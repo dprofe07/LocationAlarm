@@ -5,12 +5,26 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
+    <org.osmdroid.views.MapView
+        android:id="@+id/map_map"
+        android:layout_width="fill_parent"
+        android:layout_height="fill_parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintHorizontal_bias="0.0"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintVertical_bias="0.0">
+
+    </org.osmdroid.views.MapView>
+
     <Button
         android:id="@+id/map_btnMe"
         android:layout_width="50dp"
         android:layout_height="50dp"
         android:layout_marginEnd="10dp"
         android:layout_marginBottom="10dp"
+        android:backgroundTint="@android:color/transparent"
         android:foreground="@drawable/my_location"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
@@ -24,8 +38,7 @@
         android:backgroundTint="@android:color/transparent"
         android:foreground="@drawable/point_location"
         app:layout_constraintBottom_toTopOf="@+id/map_btnMe"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:strokeColor="#E91E63" />
+        app:layout_constraintEnd_toEndOf="parent" />
 
     <Button
         android:id="@+id/map_btnSettings"
@@ -37,7 +50,6 @@
         android:foreground="@drawable/settings"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
-
     <Button
         android:id="@+id/map_btnConfirmPoint"
         android:layout_width="50dp"
@@ -46,20 +58,20 @@
         android:layout_marginEnd="10dp"
         android:backgroundTint="@android:color/transparent"
         android:foreground="@drawable/confirm"
+        android:stateListAnimator="@null"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintTop_toBottomOf="@+id/map_btnSettings" />
-
-    <org.osmdroid.views.MapView
-        android:id="@+id/map_map"
-        android:layout_width="fill_parent"
-        android:layout_height="fill_parent"
-        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/map_btnSettings" />
+    <Button
+        android:id="@+id/map_btnRemovePoint"
+        android:layout_width="50dp"
+        android:layout_height="50dp"
+        android:layout_marginTop="10dp"
+        android:layout_marginEnd="10dp"
+        android:backgroundTint="@android:color/transparent"
+        android:foreground="@drawable/remove_point"
+        android:stateListAnimator="@null"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintHorizontal_bias="0.0"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintVertical_bias="0.0">
+        app:layout_constraintTop_toBottomOf="@id/map_btnConfirmPoint" />
 
-    </org.osmdroid.views.MapView>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

@@ -1,13 +1,18 @@
 package com.dprofe.locationalarm
 
 import android.Manifest
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Point
 import android.location.Location
+import android.media.Ringtone
 import android.media.RingtoneManager
+import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.preference.PreferenceManager
@@ -65,7 +70,7 @@ class MainActivity : AppCompatActivity() {
                 Manifest.permission.WRITE_EXTERNAL_STORAGE,
                 Manifest.permission.ACCESS_COARSE_LOCATION,
                 Manifest.permission.ACCESS_FINE_LOCATION
-            )
+            ).apply { if (Build.VERSION.SDK_INT > 33) add(Manifest.permission.POST_NOTIFICATIONS) }
         )
 
         setContentView(R.layout.activity_main)
@@ -117,8 +122,10 @@ class MainActivity : AppCompatActivity() {
             map.overlays.remove(targetPointCirclePolygon)
             map.overlays.remove(presetPointCirclePolygon)
             presetPoint?.let {
-                it.icon = ResourcesCompat.getDrawable(resources, R.drawable.alarm_point, null)?.toBitmap(50, 50)?.toDrawable(resources)
-                targetPointCirclePolygon = createCirclePolygon(currentRadius.toDouble(), it, Color.rgb(0, 100, 0))
+                it.icon = ResourcesCompat.getDrawable(resources, R.drawable.alarm_point, null)
+                    ?.toBitmap(50, 50)?.toDrawable(resources)
+                targetPointCirclePolygon =
+                    createCirclePolygon(currentRadius.toDouble(), it, Color.rgb(0, 100, 0))
                 map.overlays.add(targetPointCirclePolygon)
                 targetPoint = it
                 presetPoint = null
@@ -128,18 +135,15 @@ class MainActivity : AppCompatActivity() {
 
         btnRemovePoint = findViewById(R.id.map_btnRemovePoint)
         btnRemovePoint.setOnClickListener {
-            targetPoint?.remove(map)
-            map.overlays.remove(targetPoint)
-            map.overlays.remove(targetPointCirclePolygon)
-
             presetPoint?.remove(map)
             map.overlays.remove(presetPoint)
-            map.overlays.remove(presetPointCirclePolygon)
 
+            presetPoint = targetPoint
+            presetPoint?.icon = ResourcesCompat.getDrawable(resources, R.drawable.alarm_point_preset, null)
+                ?.toBitmap(50, 50)?.toDrawable(resources)
             targetPoint = null
-            presetPoint = null
 
-            map.invalidate()
+            redraw()
         }
 
         btnMe = findViewById(R.id.map_btnMe)
@@ -180,43 +184,138 @@ class MainActivity : AppCompatActivity() {
         }
 
         val northCompassOverlay = object : CompassOverlay(applicationContext, map) {
+
             override fun draw(c: Canvas?, pProjection: Projection?) {
                 drawCompass(c, -map.mapOrientation, pProjection?.screenRect)
             }
 
             override fun onSingleTapConfirmed(e: MotionEvent, mapView: MapView?): Boolean {
-                val reuse = Point()
-                map.projection.rotateAndScalePoint(e.x.toInt(), e.y.toInt(), reuse)
+                val p = Point()
+                map.projection.rotateAndScalePoint(e.x.toInt(), e.y.toInt(), p)
+                val x = p.x / mScale
+                val y = p.y / mScale
 
-                if (reuse.x < mCompassFrameCenterX * 2 && reuse.y < mCompassFrameCenterY * 2) {
+                val dx = x - 30
+                val dy = y - 60
+
+                if (dx * dx + dy * dy <= 900) {
                     map.controller.animateTo(null, null, 500, 0f)
                     return true
                 }
                 return false
             }
         }
+        northCompassOverlay.setCompassCenter(30f, 60f)
         map.overlays.add(northCompassOverlay)
 
         thread {
-            while (distanceBetween(gpsLocProvider.lastKnownLocation, targetPoint?.position) > currentRadius) {
-                Thread.sleep(100)
-                Log.d("loc-alarm", "waiting, ${distanceBetween(gpsLocProvider.lastKnownLocation, targetPoint?.position)}")
+            while (true) {
+                while (distanceBetween(
+                        gpsLocProvider.lastKnownLocation,
+                        targetPoint?.position
+                    ) > currentRadius
+                ) {
+                    Thread.sleep(200)
+                    Log.d(
+                        "loc-alarm",
+                        "waiting, ${
+                            distanceBetween(
+                                gpsLocProvider.lastKnownLocation,
+                                targetPoint?.position
+                            )
+                        }"
+                    )
+                }
+                playingRingtone?.let {
+                    if (it.isPlaying)
+                        it.stop()
+                }
+
+                Log.d("loc-alarm", "shown")
+
+                presetPoint = targetPoint
+                presetPoint?.icon = ResourcesCompat.getDrawable(resources, R.drawable.alarm_point_preset, null)
+                    ?.toBitmap(50, 50)?.toDrawable(resources)
+
+                targetPoint = null
+                runOnUiThread {  redraw() }
+
+                if (ActivityCompat.checkSelfPermission(
+                        this,
+                        Manifest.permission.POST_NOTIFICATIONS
+                    ) == PackageManager.PERMISSION_GRANTED
+                ) {
+
+                    val notificationBodyIntent =
+                        Intent(applicationContext, MainActivity::class.java)
+                    notificationBodyIntent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    val contentIntent = PendingIntent.getActivity(
+                        applicationContext,
+                        0,
+                        notificationBodyIntent,
+                        PendingIntent.FLAG_CANCEL_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                    )
+
+                    val buttonStopIntent =
+                        Intent(this, NotificationButtonPressedReciever::class.java)
+                    val pButtonStopIntent = PendingIntent.getBroadcast(
+                        this,
+                        0,
+                        buttonStopIntent,
+                        PendingIntent.FLAG_IMMUTABLE
+                    )
+
+
+                    val notificationManager = NotificationManagerCompat.from(applicationContext)
+                    val channel = NotificationChannel(
+                        "location-alarm",
+                        "Уведомление о прибытии",
+                        NotificationManager.IMPORTANCE_HIGH
+                    )
+
+                    notificationManager.createNotificationChannel(channel)
+
+                    val notification =
+                        NotificationCompat.Builder(applicationContext, "location-alarm")
+                            .setContentTitle("Вы приехали!")
+                            .setContentText("Вы достигли указанной в приложении зоны")
+                            .setPriority(NotificationCompat.PRIORITY_MAX)
+                            .setSmallIcon(R.drawable.notification_icon)
+                            .addAction(
+                                NotificationCompat.Action(
+                                    null,
+                                    "Выключить оповещение",
+                                    pButtonStopIntent
+                                )
+                            )
+                            .setContentIntent(contentIntent)
+                            .setOngoing(true)
+                            .setSound(null)
+                            .setDefaults(0)
+                            .build()
+
+                    notification.deleteIntent = pButtonStopIntent
+                    notificationManager.notify(NOTIFICATION_ID, notification)
+                    Thread.sleep(100)
+
+
+                    val powermanager = (getSystemService(POWER_SERVICE) as PowerManager)
+                    val wakeLock = powermanager.newWakeLock(
+                        (PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.FULL_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP),
+                        "locationalarm:tag"
+                    )
+                    wakeLock.acquire()
+                    playingRingtone = RingtoneManager.getRingtone(
+                        applicationContext,
+                        RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+                    ).apply {
+                        isLooping = true
+                        play()
+                    }
+
+                }
             }
-            Thread.sleep(4000)
-            Log.d("loc-alarm", "shown")
-            val powermanager = (getSystemService(POWER_SERVICE) as PowerManager)
-            val wakeLock = powermanager.newWakeLock(
-                (PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.FULL_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP),
-                "locationalarm:tag"
-            )
-            wakeLock.acquire()
-            val r = RingtoneManager.getRingtone(applicationContext, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALL))
-            r.isLooping = true
-            r.play()
-            r.volume = 1f
 
-
-            runOnUiThread { Toast.makeText(this, "ahaahahaaha", Toast.LENGTH_SHORT).show() }
         }
     }
 
@@ -226,20 +325,27 @@ class MainActivity : AppCompatActivity() {
         if (requestCode == 100 && resultCode == RESULT_OK) {
             currentRadius = data?.getIntExtra("radius", currentRadius) ?: currentRadius
 
-            // redrawing
-            map.overlays.remove(targetPointCirclePolygon)
-            map.overlays.remove(presetPointCirclePolygon)
-
-            targetPoint?.let {
-                targetPointCirclePolygon = createCirclePolygon(currentRadius.toDouble(), it, Color.rgb(0, 100, 0))
-                map.overlays.add(targetPointCirclePolygon)
-            }
-            presetPoint?.let {
-                presetPointCirclePolygon = createCirclePolygon(currentRadius.toDouble(), it, Color.rgb(100, 100, 0))
-                map.overlays.add(presetPointCirclePolygon)
-            }
-            map.invalidate()
+            redraw()
         }
+    }
+
+    fun redraw() {
+        map.overlays.remove(targetPointCirclePolygon)
+        map.overlays.remove(presetPointCirclePolygon)
+
+        targetPointCirclePolygon = null
+        targetPoint?.let {
+            targetPointCirclePolygon =
+                createCirclePolygon(currentRadius.toDouble(), it, Color.rgb(0, 100, 0))
+            map.overlays.add(targetPointCirclePolygon)
+        }
+        presetPointCirclePolygon = null
+        presetPoint?.let {
+            presetPointCirclePolygon =
+                createCirclePolygon(currentRadius.toDouble(), it, Color.rgb(100, 100, 0))
+            map.overlays.add(presetPointCirclePolygon)
+        }
+        map.invalidate()
     }
 
     override fun onStop() {
@@ -259,7 +365,8 @@ class MainActivity : AppCompatActivity() {
             )
         }
         q.fillPaint.color = Color.argb(50, Color.red(color), Color.green(color), Color.blue(color))
-        q.outlinePaint.color = Color.argb(50, Color.red(color), Color.green(color), Color.blue(color))
+        q.outlinePaint.color =
+            Color.argb(50, Color.red(color), Color.green(color), Color.blue(color))
         q.setOnClickListener { _, _, _ ->
             return@setOnClickListener false
         }
@@ -283,7 +390,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun distanceBetween(a: Any?, b: Any?): Float {
-        return distanceBetween(toGeoPoint(a) ?: return Float.POSITIVE_INFINITY, toGeoPoint(b) ?: return Float.POSITIVE_INFINITY)
+        return distanceBetween(
+            toGeoPoint(a) ?: return Float.POSITIVE_INFINITY,
+            toGeoPoint(b) ?: return Float.POSITIVE_INFINITY
+        )
     }
 
     private fun requestPermissionsIfNecessary(permissions: ArrayList<String>) {
@@ -303,5 +413,10 @@ class MainActivity : AppCompatActivity() {
                 REQUEST_PERMISSIONS_REQUEST_CODE
             )
         }
+    }
+
+    companion object {
+        var playingRingtone: Ringtone? = null
+        const val NOTIFICATION_ID = 1225
     }
 }

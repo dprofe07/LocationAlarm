@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.Service
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Canvas
@@ -17,6 +18,8 @@ import android.media.Ringtone
 import android.media.RingtoneManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import android.preference.PreferenceManager
 import android.util.Log
@@ -58,7 +61,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnPoint: Button
     private lateinit var btnConfirmPoint: Button
     private lateinit var btnRemovePoint: Button
-    lateinit var locationListener: LocationListener
+    lateinit var trackerHandler: Handler
     var targetPoint: Marker? = null
     var presetPoint: Marker? = null
     var targetPointCirclePolygon: Polygon? = null
@@ -99,12 +102,8 @@ class MainActivity : AppCompatActivity() {
 
 
         if (isGranted(this, Manifest.permission.ACCESS_FINE_LOCATION)) {
-            val lm = getSystemService(LOCATION_SERVICE) as LocationManager
-            locationListener = LocationTrackerListener(this)
-            lm.requestLocationUpdates(
-                LocationManager.GPS_PROVIDER, 1,
-                0f, locationListener
-            )
+            trackerHandler = Handler(Looper.getMainLooper())
+            trackerHandler.postDelayed(this::checkLocation, 100)
         }
 
         gpsLocProvider = GpsMyLocationProvider(applicationContext)
@@ -134,6 +133,98 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+    }
+
+    private fun checkLocation() {
+        val dist = distanceBetween(gpsLocProvider.lastKnownLocation, targetPoint?.position)
+        if (dist > currentRadius) {
+            Log.d("loc-alarm", "waiting, $dist")
+            trackerHandler.postDelayed(this::checkLocation, 100)
+            return
+        }
+        playingRingtone?.let {
+            if (it.isPlaying)
+                it.stop()
+        }
+
+        Log.d("loc-alarm", "shown")
+
+        presetPoint = targetPoint
+        presetPoint?.icon =
+            ResourcesCompat.getDrawable(resources, R.drawable.alarm_point_preset, null)
+                ?.toBitmap(50, 50)?.toDrawable(resources)
+
+        targetPoint = null
+        runOnUiThread { redraw() }
+
+        if (isGranted(this, Manifest.permission.POST_NOTIFICATIONS)) {
+            val notificationBodyIntent = Intent(applicationContext, MainActivity::class.java)
+            notificationBodyIntent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            val contentIntent = PendingIntent.getActivity(
+                applicationContext,
+                0,
+                notificationBodyIntent,
+                PendingIntent.FLAG_CANCEL_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val buttonStopIntent =
+                Intent(this, NotificationButtonPressedReciever::class.java)
+            val pButtonStopIntent = PendingIntent.getBroadcast(
+                this,
+                0,
+                buttonStopIntent,
+                PendingIntent.FLAG_IMMUTABLE
+            )
+
+
+            val notificationManager = NotificationManagerCompat.from(applicationContext)
+            val channel = NotificationChannel(
+                "location-alarm",
+                "Уведомление о прибытии",
+                NotificationManager.IMPORTANCE_HIGH
+            )
+
+            notificationManager.createNotificationChannel(channel)
+
+            val notification =
+                NotificationCompat.Builder(applicationContext, "location-alarm")
+                    .setContentTitle("Вы приехали!")
+                    .setContentText("Вы достигли указанной в приложении зоны")
+                    .setPriority(NotificationCompat.PRIORITY_MAX)
+                    .setSmallIcon(R.drawable.notification_icon)
+                    .addAction(
+                        NotificationCompat.Action(
+                            null,
+                            "Выключить оповещение",
+                            pButtonStopIntent
+                        )
+                    )
+                    .setContentIntent(contentIntent)
+                    .setOngoing(true)
+                    .setSound(null)
+                    .setDefaults(0)
+                    .build()
+
+            notification.deleteIntent = pButtonStopIntent
+            notificationManager.notify(MainActivity.NOTIFICATION_ID, notification)
+            Thread.sleep(100)
+
+
+            val powermanager = (getSystemService(Service.POWER_SERVICE) as PowerManager)
+            val wakeLock = powermanager.newWakeLock(
+                (PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.FULL_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP),
+                "locationalarm:tag"
+            )
+            wakeLock.acquire()
+            playingRingtone = RingtoneManager.getRingtone(
+                applicationContext,
+                RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+            ).apply {
+                isLooping = true
+                play()
+            }
+            trackerHandler.postDelayed(this::checkLocation, 100)
+        }
     }
 
     private fun configureButtons() {
@@ -199,12 +290,6 @@ class MainActivity : AppCompatActivity() {
                 ?.toBitmap(50, 50)?.toDrawable(resources)
             targetPoint = it
             presetPoint = null
-            locationListener.onLocationChanged(
-                Location(
-                    gpsLocProvider.lastKnownLocation.latitude,
-                    gpsLocProvider.lastKnownLocation.longitude
-                )
-            )
         }
         redraw()
 
@@ -275,14 +360,6 @@ class MainActivity : AppCompatActivity() {
 
         if (requestCode == 100) {
             redraw()
-            targetPoint?.let {
-                locationListener.onLocationChanged(
-                    Location(
-                        gpsLocProvider.lastKnownLocation.latitude,
-                        gpsLocProvider.lastKnownLocation.longitude
-                    )
-                )
-            }
         }
     }
 

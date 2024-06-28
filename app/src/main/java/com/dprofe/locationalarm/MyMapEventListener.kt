@@ -1,6 +1,8 @@
 package com.dprofe.locationalarm
 
 import android.graphics.Color
+import android.location.Location
+import android.location.LocationManager
 import androidx.core.content.res.ResourcesCompat
 import androidx.core.graphics.drawable.toBitmap
 import androidx.core.graphics.drawable.toDrawable
@@ -13,30 +15,33 @@ class MyMapEventListener(val activity: MainActivity) : MapEventsReceiver {
     override fun singleTapConfirmedHelper(p: GeoPoint?): Boolean {
         activity.run {
             if (p == null) {
+                presetPoint?.remove(map)
+                map.overlays.remove(presetPoint)
                 presetPoint = null
                 return@run
             }
 
             if (presetPoint == null && presetPointCirclePolygon == null) {
                 presetPoint = Marker(map).apply {
-                    this.icon = ResourcesCompat.getDrawable(resources, R.drawable.alarm_point_preset, null)
+                    icon = ResourcesCompat.getDrawable(resources, R.drawable.alarm_point_preset, null)
                         ?.toBitmap(50, 50)?.toDrawable(resources)
-                    this.position = p
-                    this.isDraggable = false
+                    position = p
+                    isDraggable = false
                     setOnMarkerClickListener { _, _ ->
                         return@setOnMarkerClickListener true
                     }
                 }
+
                 map.overlays.add(presetPoint)
-                activity.presetPointCirclePolygon = activity.createCirclePolygon(activity.currentRadius.toDouble(), presetPoint!!, Color.rgb(100, 100, 0))
-                map.overlays.add(activity.presetPointCirclePolygon)
-                map.invalidate()
+                redraw()
             } else {
                 presetPoint?.remove(map)
                 map.overlays.remove(presetPoint)
                 presetPoint = null
-                map.overlays.remove(activity.presetPointCirclePolygon)
-                activity.presetPointCirclePolygon = null
+
+                map.overlays.remove(presetPointCirclePolygon)
+                presetPointCirclePolygon = null
+
                 this@MyMapEventListener.singleTapConfirmedHelper(p)
             }
         }

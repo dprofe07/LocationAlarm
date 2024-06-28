@@ -21,11 +21,10 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         numRadius = findViewById(R.id.settings_numRadius)
-        numRadius.setText(intent.getIntExtra("radius", 100).toString())
+        numRadius.setText(MainActivity.currentRadius.toString())
         numRadius.setOnEditorActionListener { textView, i, keyEvent ->
-            val intent = Intent()
-            intent.putExtra("radius", numRadius.text.toString().toIntOrNull() ?: 100)
-            setResult(RESULT_OK, intent)
+            MainActivity.currentRadius = numRadius.text.toString().toIntOrNull() ?: 100
+
             return@setOnEditorActionListener false
         }
     }
